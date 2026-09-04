@@ -1,0 +1,129 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  llm-stats — site configuration
+#
+#  Everything on the page is generated from this file plus data/models.json.
+#  Change a category threshold, a colour, a chart, or a line of copy here and
+#  re-run `npm run build`; nothing else needs editing.
+#
+#  Refresh the underlying model data with `npm run fetch`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+site:
+  title: Open vs. Frontier
+  subtitle: The capability frontier, by how much hardware you need to run it
+  description: >-
+    Tracking the best model available in each deployment class over time —
+    from models that fit on a single consumer GPU up to the closed frontier.
+  lede: >-
+    Every point below is a model that set a new record for its class on the day
+    it shipped. The gap between the closed frontier and open weights you can
+    download is the story these charts tell.
+  url: ""
+  locale: en
+
+source:
+  name: Artificial Analysis
+  url: https://artificialanalysis.ai/leaderboards/models
+  note: >-
+    Scores are Artificial Analysis index values. Parameter counts are total
+    (not active) parameters, in billions, as reported by Artificial Analysis.
+
+# ── Deployment classes ───────────────────────────────────────────────────────
+#  Matched top-to-bottom; order also sets legend order and drawing order.
+#
+#  match:
+#    openWeights : true | false   — require open (or closed) weights
+#    minParams   : billions, inclusive lower bound on total parameters
+#    maxParams   : billions, exclusive upper bound on total parameters
+#
+#  The two consumer tiers are cumulative by design: "< 120B" means the best
+#  model you can run under a 120B budget, so it includes the 27B tier as well.
+categories:
+  - id: frontier
+    label: Frontier
+    legend: Frontier (proprietary)
+    blurb: Closed-weight models served only by API. The ceiling of what exists.
+    color: "#43002E"
+    colorDark: "#F2B8E2"
+    emphasis: true
+    match:
+      openWeights: false
+
+  - id: datacenter
+    label: Data-center open weights
+    legend: Data-center open weights
+    blurb: >-
+      Downloadable weights of 120B parameters or more — the large mixture-of-experts
+      releases that need a multi-GPU node to serve.
+    color: "#6D1BFC"
+    colorDark: "#B490FF"
+    match:
+      openWeights: true
+      minParams: 120
+
+  - id: lt120
+    label: "< 120B parameters"
+    legend: "Open weights < 120B"
+    blurb: >-
+      Open weights small enough for a single high-memory accelerator or a
+      128 GB workstation.
+    color: "#00857A"
+    colorDark: "#5FD9CB"
+    # Drawn wider than the tier it contains, so where the two share a record
+    # holder the teal still reads as a halo under the orange line.
+    lineWidth: 3.4
+    match:
+      openWeights: true
+      maxParams: 120
+
+  - id: lt27
+    label: "27B and under"
+    legend: "Open weights \u2264 27B"
+    blurb: >-
+      The single-GPU tier — open weights that fit on one prosumer card. Models
+      branded "27B" report 27.8B parameters, so the bound sits just above 27
+      to admit them; set maxParams to 27 for a strict cutoff.
+    color: "#EA580C"
+    colorDark: "#FF9E5E"
+    match:
+      openWeights: true
+      maxParams: 28
+
+# ── Charts ───────────────────────────────────────────────────────────────────
+#  Add an entry here and a new chart appears on the page.
+#  `metric` is any numeric field in data/models.json.
+charts:
+  - id: intelligence
+    metric: intelligenceIndex
+    title: Overall intelligence over time
+    subtitle: Artificial Analysis Intelligence Index — best model in each class, by release date
+    yLabel: Intelligence Index
+    lineStyle: linear      # linear | step
+    yMin: 0
+
+  - id: coding
+    metric: codingIndex
+    title: Coding intelligence over time
+    subtitle: Artificial Analysis Coding Index — best model in each class, by release date
+    yLabel: Coding Index
+    lineStyle: linear
+    yMin: 0
+
+chart_options:
+  width: 1180
+  height: 760
+  showScores: true        # print the score alongside each annotation
+  minDate: ""            # optional "YYYY-MM-DD" clip; earlier records carry in at the left edge
+
+# ── Catch-up projection ──────────────────────────────────────────────────────
+#  Least-squares fit through each class's record-setting releases, used to
+#  estimate when open weights reach today's frontier score, and whether the
+#  open trend is closing on the frontier trend at all.
+projection:
+  enabled: true
+  baseline: frontier      # the class everyone is measured against
+  lookbackMonths: 24      # only records from this recent window are fitted
+  horizonMonths: 24       # how far past today the projection is drawn
+  maxHorizonYears: 10     # crossings further out than this are reported as "beyond horizon"
+  height: 430
+  defaultModel: linear    # linear | quadratic — which fit the page opens on

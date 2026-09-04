@@ -1,0 +1,7 @@
+node_modules/
+.DS_Store
+*.log
+
+# dist/ is committed on purpose: it is the deployable static site.
+# Uncomment if you'd rather build in CI instead.
+# dist/
