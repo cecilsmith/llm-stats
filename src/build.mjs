@@ -9,8 +9,8 @@
  */
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import yaml from 'js-yaml';
-import { buildSeries, summarise } from './lib/data.mjs';
-import { project, toMonths } from './lib/regress.mjs';
+import { buildSeries, summarise, buildProviderSeries } from './lib/data.mjs';
+import { project, projectProviders, fitSeries, toMonths } from './lib/regress.mjs';
 import { renderPage } from './lib/page.mjs';
 
 const url = (p) => new URL(p, import.meta.url);
@@ -39,6 +39,16 @@ function minifyJs(js) {
  * Emit one `--c` custom property per category, with a dark-theme override, so
  * the pre-rendered SVG and the surrounding chrome recolour with the theme.
  */
+/** Provider colours, paired with their dark-theme counterparts. */
+function providerPalette(providers, cfg) {
+  const dark = cfg.paletteDark ?? [];
+  return providers.map((p, i) => ({
+    id: p.id,
+    color: p.category.color,
+    colorDark: dark.length ? dark[i % dark.length] : null,
+  }));
+}
+
 function paletteCss(categories) {
   const rule = (scope, c, color) => `${scope}.s-${c.id},${scope}.c-${c.id}{--c:${color}}`;
   const light = categories.map((c) => rule('', c, c.color)).join('') +
@@ -75,17 +85,39 @@ if (config.projection?.enabled) {
   }
 }
 
+// Provider explorer: every scored model grouped by creator, plus the same
+// projection applied per provider against the frontier trend.
+const pcfg = config.providers ?? {};
+const providerChart = charts.find((c) => c.metric === pcfg.metric) ?? charts[0];
+let providers = [];
+let providerProjection = null;
+if (pcfg.enabled) {
+  providers = buildProviderSeries(models, pcfg.metric, pcfg);
+  const frontier = seriesByChart.get(providerChart.id)?.get(config.projection.baseline);
+  if (frontier?.points.length && config.projection?.enabled) {
+    const baseFits = fitSeries(frontier.points, now, config.projection.lookbackMonths);
+    const target = Math.max(...frontier.points.map((p) => p.value));
+    providerProjection = projectProviders(
+      providers, baseFits, categories.find((c) => c.id === config.projection.baseline),
+      target, config.projection, now,
+    );
+  }
+}
+
 const summary = summarise(models, seriesByChart.get(charts[0].id), charts[0].metric);
 
 const html = renderPage({
   config,
-  css: minifyCss(await read('./styles.css')) + paletteCss(categories),
+  css: minifyCss(await read('./styles.css')) + paletteCss(categories) + paletteCss(providerPalette(providers, pcfg)),
   js: minifyJs(await read('./assets/app.js')),
   dataset,
   charts,
   seriesByChart,
   summary,
   projections,
+  providers,
+  providerProjection,
+  providerChart,
 });
 
 const out = url('../dist/');
@@ -97,6 +129,9 @@ await writeFile(new URL('models.json', out), JSON.stringify(dataset));
 
 const kb = (n) => `${(n / 1024).toFixed(1)} kB`;
 console.log(`dist/index.html   ${kb(Buffer.byteLength(html))}`);
+if (providers.length) {
+  console.log(`  ${'providers'.padEnd(13)} ${providers.length} shown, ${providers.filter((p) => p.on).length} on by default, ${providers.reduce((a, p) => a + p.all.length, 0)} models plotted`);
+}
 for (const chart of charts) {
   const counts = [...seriesByChart.get(chart.id).values()]
     .map((s) => `${s.id}:${s.points.length}`)

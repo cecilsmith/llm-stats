@@ -114,7 +114,7 @@ export function fitSeries(points, now, lookbackMonths, minPoints = 5) {
   const recent = all.filter((p) => p.x >= now - lookbackMonths);
   const used = recent.length >= minPoints ? recent : all.slice(-minPoints);
   const linear = polyFit(used, 1);
-  const quadratic = polyFit(used, 2);
+  const quadratic = polyFit(used, 2); // null when there are too few points for three parameters
   if (!linear) return null;
   return { points: used, linear, quadratic, curvature: curvatureTest(linear, quadratic) };
 }
@@ -227,4 +227,35 @@ export function project(seriesById, categories, options, now) {
     now,
     models: MODELS,
   };
+}
+
+/**
+ * The same catch-up projection, applied per provider instead of per class.
+ *
+ * The baseline stays the frontier trend, so every provider is measured against
+ * the same reference the class charts use, and the linear/quadratic toggle
+ * carries over unchanged.
+ */
+export function projectProviders(providers, baseFits, baseCategory, target, options, now) {
+  const { lookbackMonths, maxHorizonYears } = options;
+  if (!baseFits) return null;
+
+  const rows = providers.map((p) => {
+    const fits = fitSeries(p.points, now, lookbackMonths);
+    if (!fits) return null;
+    const models = Object.fromEntries(
+      MODELS.map((m) => [m, outcome(fits[m], baseFits[m], target, now, maxHorizonYears, m)]),
+    );
+    return {
+      category: p.category,
+      provider: p,
+      on: p.on,
+      fits,
+      curvature: fits.curvature,
+      current: p.points.at(-1),
+      models,
+    };
+  }).filter(Boolean);
+
+  return { baseline: baseCategory.id, baseCategory, baseFits, target, rows, now, models: MODELS };
 }

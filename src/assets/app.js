@@ -51,6 +51,38 @@
     });
   });
 
+  /* provider selection ----------------------------------------------------- */
+  var picker = document.getElementById('provider-picker');
+  if (picker) {
+    var section = document.getElementById('providers');
+    var boxes = [].slice.call(picker.querySelectorAll('input[data-provider]'));
+    var initial = boxes.map(function (b) { return b.checked; });
+    var counter = picker.querySelector('[data-shown]');
+
+    function apply() {
+      var on = 0;
+      boxes.forEach(function (box) {
+        var targets = section.querySelectorAll('[data-series="' + box.dataset.provider + '"]');
+        for (var i = 0; i < targets.length; i++) targets[i].classList.toggle('is-off', !box.checked);
+        if (box.checked) on++;
+      });
+      if (counter) counter.textContent = String(on);
+    }
+
+    picker.addEventListener('change', function (e) {
+      if (e.target.dataset.provider) apply();
+    });
+
+    picker.addEventListener('click', function (e) {
+      var mode = e.target.dataset.pick;
+      if (!mode) return;
+      boxes.forEach(function (box, i) {
+        box.checked = mode === 'all' ? true : mode === 'none' ? false : initial[i];
+      });
+      apply();
+    });
+  }
+
   /* tooltip --------------------------------------------------------------- */
   var tip = document.createElement('div');
   tip.className = 'tip';
@@ -63,10 +95,12 @@
 
   function show(dot) {
     var d = dot.dataset;
+    var svg = dot.ownerSVGElement;
+    var metric = (svg && svg.dataset.metric) || '';
     tip.innerHTML =
       '<div class="t-name">' + d.name + '</div>' +
       '<div class="t-sub">' + d.creator + ' · ' + d.date + '</div>' +
-      '<div class="t-score"><b>' + d.score + '</b><span>' + d.metric + '</span></div>' +
+      '<div class="t-score"><b>' + d.score + '</b><span>' + metric + '</span></div>' +
       '<dl>' + row('Class', d.category) + row('Parameters', d.params) + row('Weights', d.license) + '</dl>';
 
     var r = dot.getBoundingClientRect();

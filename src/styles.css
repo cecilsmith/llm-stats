@@ -198,6 +198,36 @@ section + section { border-top: 1px solid var(--line); }
 .class-card .lead-model b { display: block; font-family: var(--mono); font-size: 21px; font-weight: 500; letter-spacing: -.02em; color: var(--c); }
 .class-card .lead-model span { color: var(--muted); }
 
+/* ── provider picker ──────────────────────────────────────────────────────── */
+.sub-head { margin: 44px 0 18px; padding-top: 36px; border-top: 1px solid var(--line); }
+.sub-head h3 { font-family: var(--serif); font-size: 1.25rem; font-weight: 500; }
+.sub-head p { margin-top: 8px; color: var(--muted); font-size: 14px; max-width: 78ch; }
+
+.picker { border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); margin-bottom: 16px; overflow: hidden; }
+.picker-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 11px 14px; border-bottom: 1px solid var(--line); background: var(--surface); font-size: 12.5px; color: var(--muted); }
+.picker-count b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.picker-actions { display: flex; gap: 6px; }
+.mini { padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.mini:hover { background: var(--surface-2); color: var(--ink); }
+
+.picker-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); background: var(--card); }
+.pick { display: flex; align-items: center; gap: 8px; padding: 9px 13px; background: var(--card); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); cursor: pointer; font-size: 13px; user-select: none; }
+.pick:hover { background: var(--surface); }
+.pick input { position: absolute; opacity: 0; width: 0; height: 0; }
+.pick .swatch { width: 10px; height: 10px; border-radius: 2px; background: var(--faint); flex: none; transition: background .12s; }
+.pick:has(input:checked) .swatch { background: var(--c); }
+.pick:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pick .pname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); }
+.pick:has(input:checked) .pname { color: var(--ink); font-weight: 500; }
+.pick .pmeta { font-family: var(--mono); font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+
+/* Hidden providers: baked in at build time, toggled by the picker. */
+.is-off { display: none !important; }
+.chart.providers .dot.sub { opacity: .32; stroke-width: 0; }
+.chart.providers .dot.rec { opacity: .95; }
+.chart.providers .line { stroke-width: 1.8; opacity: .9; }
+.chart.providers .ann { font-size: 11px; font-weight: 600; }
+
 /* ── model toggle ─────────────────────────────────────────────────────────── */
 .proj-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 .seg { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }

@@ -127,3 +127,45 @@ projection:
   maxHorizonYears: 10     # crossings further out than this are reported as "beyond horizon"
   height: 430
   defaultModel: linear    # linear | quadratic — which fit the page opens on
+
+# ── Provider explorer ────────────────────────────────────────────────────────
+#  Every scored model plotted by who made it, plus the same catch-up projection
+#  applied per provider. Readers pick which providers to show.
+providers:
+  enabled: true
+  metric: intelligenceIndex   # any numeric field in models.json
+  minModels: 3                # providers with fewer scored models are omitted
+  maxProviders: 24            # cap the selector, ranked by model count
+  defaultCount: 5             # how many are ticked on load
+  # Pin the default selection by name; leave empty to use the top `defaultCount`
+  # providers by number of scored models.
+  featured: []
+  height: 560
+  projectionHeight: 430
+  # Cycled in rank order, so the default selection always gets distinct colours.
+  palette:
+    - "#6D1BFC"
+    - "#EA580C"
+    - "#00857A"
+    - "#C2185B"
+    - "#1565C0"
+    - "#7B5800"
+    - "#43002E"
+    - "#0F9D58"
+    - "#8E24AA"
+    - "#D81B60"
+    - "#00838F"
+    - "#5D4037"
+  paletteDark:
+    - "#B490FF"
+    - "#FF9E5E"
+    - "#5FD9CB"
+    - "#FF8FB1"
+    - "#7FB3FF"
+    - "#E0C060"
+    - "#F2B8E2"
+    - "#6FD79A"
+    - "#D69BFF"
+    - "#FF9BC0"
+    - "#66D2DE"
+    - "#C4A08E"

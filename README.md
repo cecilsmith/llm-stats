@@ -125,17 +125,19 @@ the browser, and the page defaults to linear without JavaScript.
 
 ### Comparing the two models
 
+Figures below are from the 2026-09-04 snapshot; rerun `npm run refresh` and they move.
+
 A quadratic always fits at least as well as a linear one, so raw R² is not a
 fair contest. Each series is therefore compared with an **F-test on the
 curvature term** (α = 0.05), shown beside the quadratic R²:
 
 | Metric | Linear R² | Quadratic R² | Curvature |
 | --- | --- | --- | --- |
-| Intelligence — frontier | 0.952 | 0.978 | F=23.8 — **significant** |
+| Intelligence — frontier | 0.957 | 0.981 | F=25.5 — **significant** |
 | Intelligence — data-center | 0.926 | 0.958 | F=11.4 — **significant** |
 | Intelligence — < 120B | 0.937 | 0.982 | F=14.5 — **significant** |
 | Intelligence — ≤ 27B | 0.936 | 0.986 | F=14.6 — **significant** |
-| Coding — frontier | 0.966 | 0.976 | F=3.3 — not significant |
+| Coding — frontier | 0.970 | 0.977 | F=2.4 — not significant |
 | Coding — data-center | 0.952 | 0.966 | F=2.9 — not significant |
 | Coding — < 120B | 0.850 | 0.902 | F=2.7 — not significant |
 | Coding — ≤ 27B | 0.819 | 0.908 | F=2.9 — not significant |
@@ -150,9 +152,9 @@ quadratic model puts every catch-up date months earlier than the linear one:
 
 | | Linear | Quadratic |
 | --- | --- | --- |
-| Data-center reaches 63.1 | Jan 2027 | Sep 2026 |
-| < 120B reaches 63.1 | May 2027 | Nov 2026 |
-| ≤ 27B reaches 63.1 | Mar 2027 | Nov 2026 |
+| Data-center reaches 65.7 | Feb 2027 | Oct 2026 |
+| < 120B reaches 65.7 | Jun 2027 | Dec 2026 |
+| ≤ 27B reaches 65.7 | May 2027 | Nov 2026 |
 | Trends meet | not separable | Jun 2027 (data-center) |
 
 That spread *is* the result: on this data the answer to "when do open weights
@@ -166,3 +168,36 @@ on the fit window.
 These are extrapolations of short histories in a fast-moving field, fitted to
 points that are by construction the maxima of their class. Treat them as
 arithmetic, not forecasts.
+
+## By provider
+
+A third section plots **every scored model grouped by who made it** — faint dots
+for a provider's whole catalogue, a solid line through their own record setters —
+and applies the same projection per provider against the frontier trend.
+
+The checkbox list picks which providers appear, in both the history chart and the
+projection chart and table. All providers are pre-rendered and hidden with CSS,
+so toggling costs nothing at runtime; with JavaScript off the default selection
+still renders.
+
+Defaults to the **5 providers with the most scored models** (Alibaba, OpenAI,
+Google, Anthropic, DeepSeek). "Most popular" has no objective definition, so
+that proxy is the honest one — override it with an explicit list:
+
+```yaml
+providers:
+  featured: [OpenAI, Anthropic, Google, Meta, DeepSeek]
+```
+
+Other knobs in `data/site.yaml`:
+
+- `metric` — any numeric field in `models.json`
+- `minModels` / `maxProviders` — how much of the long tail to include
+  (default: ≥ 3 scored models, capped at 24, ranked by model count)
+- `defaultCount` — how many are ticked on load when `featured` is empty
+- `palette` / `paletteDark` — cycled in rank order, so the default selection
+  always gets distinct colours
+
+The summary lines under the provider projection describe **all** providers, not
+just the ticked ones, since they are static text; the chart and table follow the
+selection.

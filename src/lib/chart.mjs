@@ -301,7 +301,7 @@ export function renderChart(chart, series, options) {
     .map((s) => `${s.category.label}: best is ${s.pts.at(-1).label} at ${fmt(s.pts.at(-1).value, 1)}`)
     .join('. ');
 
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" preserveAspectRatio="xMidYMid meet" aria-labelledby="${chart.id}-t ${chart.id}-d">
+  return `<svg class="chart" data-metric="${esc(chart.yLabel)}" viewBox="0 0 ${W} ${H}" role="img" preserveAspectRatio="xMidYMid meet" aria-labelledby="${chart.id}-t ${chart.id}-d">
 <title id="${chart.id}-t">${esc(chart.title)}</title><desc id="${chart.id}-d">${esc(desc)}.</desc>
 <g class="grid-g">${gridY}${gridX}</g>
 <line class="axis-line" x1="${plot.x0}" x2="${plot.x1}" y1="${plot.y1}" y2="${plot.y1}"/>
@@ -330,6 +330,8 @@ export function renderProjection(chart, projection, options) {
     { category: baseCategory, fits: baseFits, models: null },
     ...rows,
   ];
+  // Provider rows arrive with an `on` flag; class rows are always shown.
+  const offClass = (s) => (s.on === false ? ' is-off' : '');
 
   const xMin = Math.min(...series.map((s) => s.fits.linear.from));
   const xMax = now + horizonMonths;
@@ -371,7 +373,7 @@ export function renderProjection(chart, projection, options) {
     `<text class="target-label s-${baseCategory.id}" x="${plot.x1 + 8}" y="${(targetY + 3.5).toFixed(1)}">frontier<tspan x="${plot.x1 + 8}" dy="12">today ${fmt(target, 1)}</tspan></text>`;
 
   /** Sample a fit into a path; quadratics need the polyline, linears are free. */
-  const curve = (f, a, b, steps = 48) => {
+  const curve = (f, a, b, steps = f.degree === 1 ? 1 : 40) => {
     if (b <= a) return '';
     const pts = [];
     for (let i = 0; i <= steps; i++) {
@@ -389,12 +391,22 @@ export function renderProjection(chart, projection, options) {
   const layers = models.map((model) => {
     // Crossing labels cluster tightly; stagger them above and below the line.
     const order = rows
-      .filter((r) => r.models[model]?.matchMonths > 0 && r.models[model].matchX <= xMax)
+      .filter((r) => r.fits[model] && r.models[model]?.matchMonths > 0 && r.models[model].matchX <= xMax)
       .sort((a, b) => a.models[model].matchX - b.models[model].matchX);
-    // Four alternating levels: under the quadratic model the crossings can land
-    // within weeks of each other, so two levels are not enough separation.
-    const LEVELS = [-12, 21, -28, 37];
-    const offset = new Map(order.map((r, i) => [r.category.id, LEVELS[i % LEVELS.length]]));
+    // Crossings can land within weeks of each other, so pack the date labels
+    // into the first level with room rather than cycling through offsets blindly.
+    const LEVELS = [-12, 21, -28, 37, -44, 53];
+    const lastRight = LEVELS.map(() => -Infinity);
+    const offset = new Map();
+    for (const r of order) {
+      const text = monthYear(r.models[model].matchDate);
+      const half = textWidth(text, 10.5) / 2;
+      const cx = sx(r.models[model].matchX);
+      let level = LEVELS.findIndex((_, i) => cx - half > lastRight[i] + 6);
+      if (level === -1) level = LEVELS.length - 1;
+      lastRight[level] = cx + half;
+      offset.set(r.category.id, LEVELS[level]);
+    }
 
     const body = series.map((s) => {
       const f = s.fits[model];
@@ -410,7 +422,7 @@ export function renderProjection(chart, projection, options) {
           `<text class="phit-label ${cls}" x="${hx.toFixed(1)}" y="${(targetY + offset.get(s.category.id)).toFixed(1)}" text-anchor="middle">${esc(monthYear(out.matchDate))}</text>`;
       }
 
-      return `<g class="series ${cls}" data-series="${s.category.id}">` +
+      return `<g class="series ${cls}${offClass(s)}" data-series="${s.category.id}">` +
         `<g clip-path="url(#${clip})">` +
         `<path class="line fitline" d="${curve(f, f.from, split)}"/>` +
         `<path class="line fitline dashed" d="${curve(f, split, xMax)}"/></g>${hit}</g>`;
@@ -430,5 +442,111 @@ export function renderProjection(chart, projection, options) {
 <line class="axis-line" x1="${plot.x0}" x2="${plot.x1}" y1="${plot.y1}" y2="${plot.y1}"/>
 <text class="axis-title" transform="translate(14 ${(plot.y0 + plot.y1) / 2}) rotate(-90)" text-anchor="middle">${esc(chart.yLabel)}</text>
 ${today}${targetLine}<g class="obs">${dots}</g>${layers}
+</svg>`;
+}
+
+/* ── provider explorer ────────────────────────────────────────────────────── */
+
+/**
+ * Every scored model, grouped by who made it: faint dots for the whole
+ * catalogue and a solid line through each provider's own record setters.
+ *
+ * All providers are drawn; the ones not selected carry `is-off` and are hidden
+ * by CSS, so toggling costs nothing at runtime. Name labels are laid out for
+ * the full set so a provider switched on later still has a reserved slot.
+ */
+export function renderProviderChart(chart, providers, options) {
+  const { width: W } = options;
+  const H = options.providerHeight ?? 560;
+  const P = { top: 26, right: 96, bottom: 46, left: 56 };
+  const plot = { x0: P.left, y0: P.top, x1: W - P.right, y1: H - P.bottom };
+
+  const every = providers.flatMap((p) => p.all);
+  if (!every.length) return '<p class="empty">No data.</p>';
+
+  const ms = (d) => new Date(`${d}T00:00:00Z`).getTime();
+  const x0 = Math.min(...every.map((m) => ms(m.date)));
+  const x1 = Math.max(...every.map((m) => ms(m.date)));
+  const padX = (x1 - x0) * 0.03;
+  const dMin = x0 - padX;
+  const dMax = x1 + padX;
+  const vMax = niceCeil(Math.max(...every.map((m) => m.value)) * 1.08);
+
+  const sx = (t) => plot.x0 + ((t - dMin) / (dMax - dMin)) * (plot.x1 - plot.x0);
+  const sy = (v) => plot.y1 - (v / vMax) * (plot.y1 - plot.y0);
+
+  const gridY = yTicks(0, vMax)
+    .map((v) => {
+      const y = sy(v).toFixed(1);
+      return `<line class="grid" x1="${plot.x0}" x2="${plot.x1}" y1="${y}" y2="${y}"/>` +
+        `<text class="axis y" x="${plot.x0 - 10}" y="${(+y + 3.5).toFixed(1)}">${fmt(v, 0)}</text>`;
+    }).join('');
+
+  const gridX = xTicks(dMin, dMax).map(({ ms: t, label }) => {
+    const x = sx(t).toFixed(1);
+    const line = `<line class="grid${label ? ' major' : ''}" x1="${x}" x2="${x}" y1="${plot.y0}" y2="${plot.y1}"/>`;
+    return label ? `${line}<text class="axis x" x="${x}" y="${plot.y1 + 20}">${label}</text>` : line;
+  }).join('');
+
+  // One name label per provider, anchored at the end of its record line.
+  const labels = providers.map((p) => {
+    const last = p.points.at(-1);
+    const fs = 11;
+    return {
+      id: p.id,
+      text: p.name,
+      px: sx(ms(last.date)),
+      py: sy(last.value),
+      fs,
+      w: textWidth(p.name, fs),
+    };
+  });
+  const markers = providers.map((p) => {
+    const last = p.points.at(-1);
+    return { id: p.id, x: sx(ms(last.date)), y: sy(last.value) };
+  });
+  const segments = providers.flatMap((p) =>
+    p.points.slice(1).map((pt, i) => [
+      { x: sx(ms(p.points[i].date)), y: sy(p.points[i].value) },
+      { x: sx(ms(pt.date)), y: sy(pt.value) },
+    ]),
+  );
+  const placed = new Map(placeLabels(labels, plot, markers, segments).map((l) => [l.id, l]));
+
+  const body = providers.map((p) => {
+    const cls = `s-${p.id}`;
+    const line = 'M' + p.points.map((pt) => `${Math.round(sx(ms(pt.date)))},${Math.round(sy(pt.value))}`).join('L');
+
+    const attrs = (m) => [
+      `data-name="${esc(m.label)}"`,
+      `data-creator="${esc(p.name)}"`,
+      `data-date="${esc(shortDate(m.date))}"`,
+      `data-score="${fmt(m.value, 1)}"`,
+      `data-category="${esc(m.isOpenWeights ? 'Open weights' : 'Proprietary')}"`,
+      `data-params="${m.totalParameters != null ? `${fmt(m.totalParameters, 0)}B total` : ''}"`,
+      `data-license="${esc(m.licenseName ?? (m.isOpenWeights ? 'Open weights' : 'Proprietary'))}"`,
+    ].join(' ');
+
+    const recordSet = new Set(p.points.map((pt) => pt.label));
+    const dots = p.all.map((m) => {
+      const record = recordSet.has(m.label);
+      return `<circle class="dot ${record ? 'rec' : 'sub'} ${cls}" cx="${Math.round(sx(ms(m.date)))}" cy="${Math.round(sy(m.value))}" r="${record ? 3.4 : 2.3}" tabindex="0" ${attrs(m)}><title>${esc(m.label)} — ${fmt(m.value, 1)}</title></circle>`;
+    }).join('');
+
+    const l = placed.get(p.id);
+    const label = `<text class="ann ${cls}" x="${l.rect.tx.toFixed(1)}" y="${l.rect.ty.toFixed(1)}" text-anchor="${l.rect.anchor}">${esc(p.name)}</text>` +
+      (l.leader
+        ? `<line class="leader ${cls}" x1="${l.px.toFixed(1)}" y1="${l.py.toFixed(1)}" x2="${((l.rect.x0 + l.rect.x1) / 2).toFixed(1)}" y2="${((l.rect.y0 + l.rect.y1) / 2 + 4).toFixed(1)}"/>`
+        : '');
+
+    return `<g class="series ${cls}${p.on ? '' : ' is-off'}" data-series="${p.id}"><path class="line" d="${line}"/>${dots}${label}</g>`;
+  }).join('');
+
+  return `<svg class="chart providers" data-metric="${esc(chart.yLabel)}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="${chart.id}-vt">
+<title id="${chart.id}-vt">${esc(chart.yLabel)} of every scored model, by provider</title>
+<g class="grid-g">${gridY}${gridX}</g>
+<line class="axis-line" x1="${plot.x0}" x2="${plot.x1}" y1="${plot.y1}" y2="${plot.y1}"/>
+<text class="axis-title" transform="translate(14 ${(plot.y0 + plot.y1) / 2}) rotate(-90)" text-anchor="middle">${esc(chart.yLabel)}</text>
+${body}
 </svg>`;
 }

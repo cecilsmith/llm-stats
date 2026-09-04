@@ -1,6 +1,6 @@
 /** Assembles the static HTML document. */
 import { esc, fmt, monthYear, humanMonths, shortDate } from './util.mjs';
-import { renderChart, renderProjection } from './chart.mjs';
+import { renderChart, renderProjection, renderProviderChart } from './chart.mjs';
 import { fromMonths } from './regress.mjs';
 
 const MARK = '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path fill="currentColor" d="M13.982 16h1.996v-3.997h-3.992V16zM7.984 0 3.992 3.997H0v3.998h5.988L9.98 3.997h2.006V0zM7.984 7.995l-3.992 4.008H0V16h5.988l3.992-3.997h2.006V7.995zM15.978 7.995V3.997h-3.992v3.998h3.992"/></svg>';
@@ -123,7 +123,7 @@ function reachCell(o) {
   return `<b>${esc(monthYear(o.matchDate))}</b><small>${humanMonths(o.matchMonths)} away</small>`;
 }
 
-function projectionTable(proj) {
+function projectionTable(proj, rowAttrs = () => '') {
   const { models } = proj;
 
   const fitCells = (fits, curv) => {
@@ -132,16 +132,16 @@ function projectionTable(proj) {
       `<td class="num r2" data-col="quadratic">${fits.quadratic ? fmt(fits.quadratic.r2, 3) : '\u2014'}` +
       (curv?.f != null
         ? `<small>${better ? 'curvature significant' : 'not significant'} (F=${fmt(curv.f, 1)})</small>`
-        : '') + '</td>';
+        : '<small>too few records</small>') + '</td>';
   };
 
-  const rows = proj.rows.map((r) => `<tr class="c-${esc(r.category.id)}">
+  const rows = proj.rows.map((r) => `<tr class="c-${esc(r.category.id)}${r.on === false ? ' is-off' : ''}" ${rowAttrs(r)}>
       <td><span class="tag"><i></i>${esc(r.category.label)}</span></td>
       <td class="num">${fmt(r.current.value, 1)}</td>
-      <td class="num">${perModel(models, (m) => fmt(r.models[m].ratePerYear, 1))}</td>
+      <td class="num">${perModel(models, (m) => (r.models[m] ? fmt(r.models[m].ratePerYear, 1) : '\u2014'))}</td>
       ${fitCells(r.fits, r.curvature)}
-      <td class="model-cell">${perModel(models, (m) => reachCell(r.models[m]))}</td>
-      <td class="verdict">${perModel(models, (m) => VERDICT[r.models[m].vs.verdict](r.models[m]))}</td>
+      <td class="model-cell">${perModel(models, (m) => (r.models[m] ? reachCell(r.models[m]) : '<span class="muted">\u2014</span>'))}</td>
+      <td class="verdict">${perModel(models, (m) => (r.models[m] ? VERDICT[r.models[m].vs.verdict](r.models[m]) : '<span class="muted">too few records to fit</span>'))}</td>
     </tr>`).join('');
 
   const b = proj.baseFits;
@@ -165,20 +165,21 @@ function projectionTable(proj) {
 }
 
 /** Lead paragraphs, written once per model and swapped with the toggle. */
-function leadFor(proj, model) {
+function leadFor(proj, model, scope = '') {
   const soonest = proj.rows
-    .filter((r) => r.models[model]?.matchMonths > 0)
+    .filter((r) => r.models[model]?.matchMonths > 0.5)
     .sort((a, b) => a.models[model].matchMonths - b.models[model].matchMonths)[0];
 
   const reach = soonest
-    ? `On its current trend, <strong>${esc(soonest.category.label)}</strong> reaches today&rsquo;s frontier score of ${fmt(proj.target, 1)} around <strong>${esc(monthYear(soonest.models[model].matchDate))}</strong> \u2014 ${humanMonths(soonest.models[model].matchMonths)} from now.`
-    : `Every open-weight class is already at or past the frontier&rsquo;s current score of ${fmt(proj.target, 1)} under this model.`;
+    ? `${scope}the soonest to reach today&rsquo;s frontier score of ${fmt(proj.target, 1)} is <strong>${esc(soonest.category.label)}</strong>, around <strong>${esc(monthYear(soonest.models[model].matchDate))}</strong> \u2014 ${humanMonths(soonest.models[model].matchMonths)} from now.`
+    : `${scope}every one is already at or past the frontier&rsquo;s current score of ${fmt(proj.target, 1)} under this model.`;
 
-  const crossing = proj.rows
+  const fitted = proj.rows.filter((r) => r.models[model]);
+  const crossing = fitted
     .filter((r) => r.models[model].vs.verdict === 'crossing')
     .sort((a, b) => a.models[model].vs.crossover - b.models[model].vs.crossover)[0];
-  const allParallel = proj.rows.every((r) => r.models[model].vs.verdict === 'parallel');
-  const allWidening = proj.rows.every((r) => r.models[model].vs.verdict === 'widening');
+  const allParallel = fitted.length > 0 && fitted.every((r) => r.models[model].vs.verdict === 'parallel');
+  const allWidening = fitted.length > 0 && fitted.every((r) => r.models[model].vs.verdict === 'widening');
 
   const catchUp = crossing
     ? `Looking further out, <strong>${esc(crossing.category.label)}</strong> is gaining on the frontier fast enough that the two trends meet around <strong>${esc(monthYear(fromMonths(crossing.models[model].vs.crossover)))}</strong>.`
@@ -195,25 +196,68 @@ function leadFor(proj, model) {
   return `<p class="proj-lead" data-for="${model}">${reach}</p><p class="proj-lead" data-for="${model}">${catchUp}${note}</p>`;
 }
 
-function projectionBlock(chart, proj, options, active) {
-  const id = `proj-${chart.id}`;
+function projectionBlock(chart, proj, options, active, id = `proj-${chart.id}`, rowAttrs, showLegend = true, scope = 'On its current trend, ') {
   const curv = proj.baseFits.curvature;
   return `<div class="proj-block" id="${id}" data-model="${active}">
   <div class="proj-head">
     <h3>${esc(chart.yLabel)}</h3>
     ${modelToggle(id, proj.models, active)}
   </div>
-  ${proj.models.map((m) => leadFor(proj, m)).join('')}
+  ${proj.models.map((m) => leadFor(proj, m, scope)).join('')}
   <figure class="figure">
-    <div class="figure-bar">${legend([proj.baseCategory, ...proj.rows.map((r) => r.category)])}<span class="hint">Click a class to hide it</span></div>
+    ${showLegend ? `<div class="figure-bar">${legend([proj.baseCategory, ...proj.rows.map((r) => r.category)])}<span class="hint">Click a class to hide it</span></div>` : ''}
     <div class="chart-scroll">${renderProjection(chart, proj, options)}</div>
     <figcaption class="figure-foot">Solid where the fit is supported by releases, dashed where it is extrapolated. Dots are the record-setting releases both models were fitted to. On this metric the quadratic term is <strong>${curv?.significant ? 'a real improvement' : 'not statistically justified'}</strong> for the frontier series (F=${fmt(curv?.f, 1)} against a ${fmt(curv?.critical, 2)} threshold).</figcaption>
   </figure>
-  ${projectionTable(proj)}
+  ${projectionTable(proj, rowAttrs)}
 </div>`;
 }
 
-export function renderPage({ config, css, js, dataset, charts, seriesByChart, summary, projections }) {
+
+/* ── provider explorer ───────────────────────────────────────────────────── */
+
+function providerPicker(providers) {
+  const items = providers.map((p) => `<label class="pick c-${esc(p.id)}">
+    <input type="checkbox" data-provider="${esc(p.id)}"${p.on ? ' checked' : ''}>
+    <i class="swatch"></i>
+    <span class="pname">${esc(p.name)}</span>
+    <span class="pmeta">${p.count} · ${fmt(p.best, 1)}</span>
+  </label>`).join('');
+
+  return `<div class="picker" id="provider-picker">
+  <div class="picker-head">
+    <span class="picker-count"><b data-shown>${providers.filter((p) => p.on).length}</b> of ${providers.length} providers shown</span>
+    <span class="picker-actions">
+      <button type="button" class="mini" data-pick="all">All</button>
+      <button type="button" class="mini" data-pick="none">None</button>
+      <button type="button" class="mini" data-pick="reset">Reset</button>
+    </span>
+  </div>
+  <div class="picker-list">${items}</div>
+</div>`;
+}
+
+function providerSection(chart, providers, proj, options, activeModel) {
+  const shown = providers.filter((p) => p.on).map((p) => p.name);
+  return `<section id="providers">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>By provider</h2>
+        <p>Every scored model plotted against ${esc(chart.yLabel)}, grouped by who built it. Faint dots are the whole catalogue; the solid line traces each provider&rsquo;s own record setters. Starts on the ${shown.length} providers with the most scored models — ${esc(shown.join(', '))} — and you can pick any combination.</p>
+      </div>
+      ${providerPicker(providers)}
+      <figure class="figure" id="provider-figure">
+        <div class="chart-scroll">${renderProviderChart(chart, providers, options)}</div>
+        <figcaption class="figure-foot">Small dots are individual releases; larger dots are the ones that set a personal best. Reasoning-effort variants are collapsed to the best-scoring variant. Hover any point for detail.</figcaption>
+      </figure>
+
+      <div class="sub-head"><h3>Projected by provider</h3><p>The same fit applied to each provider&rsquo;s own record setters, against the frontier trend. The chart and table follow the selection above; the summary lines below cover all of them. Providers with too few records to support a curve show no quadratic fit.</p></div>
+      ${proj ? projectionBlock(chart, proj, options, activeModel, 'proj-providers', (r) => `data-series="${esc(r.category.id)}"`, false, `Across all ${proj.rows.length} providers, `) : ''}
+    </div>
+  </section>`;
+}
+
+export function renderPage({ config, css, js, dataset, charts, seriesByChart, summary, projections, providers, providerProjection, providerChart }) {
   const { site, source, categories } = config;
   const primary = charts[0];
 
@@ -229,7 +273,7 @@ export function renderPage({ config, css, js, dataset, charts, seriesByChart, su
 
   const nav = charts
     .map((c) => `<a href="#${esc(c.id)}-section">${esc(c.yLabel)}</a>`)
-    .join('') + '<a href="#projection">Projection</a><a href="#classes">Classes</a>';
+    .join('') + '<a href="#projection">Projection</a><a href="#providers">Providers</a><a href="#classes">Classes</a>';
 
   return `<!doctype html>
 <html lang="${esc(site.locale || 'en')}" data-theme="">
@@ -279,6 +323,8 @@ ${chartSections}
       <p class="caveat"><strong>Read these as arithmetic, not forecasts.</strong> Both models are straight-line and curved fits through a short, noisy history of a fast-moving field, and the releases they fit are by construction the maxima of their class. A quadratic <em>always</em> fits at least as well as a linear one, so the R\u00b2 columns are not a fair contest on their own \u2014 the F-test beside the quadratic R\u00b2 is what says whether the curvature earns its extra parameter. The &ldquo;reaches&rdquo; column is the sturdier of the two estimates: it depends on one curve. The gap column depends on the <em>difference</em> of two curves, which is far noisier \u2014 under the linear model, where that difference does not clear twice its standard error, no crossing date is quoted.</p>
     </div>
   </section>` : ''}
+
+  ${providers?.length ? providerSection(providerChart, providers, providerProjection, { ...config.chart_options, horizonMonths: config.projection.horizonMonths, projectionHeight: config.providers.projectionHeight ?? config.projection.height, providerHeight: config.providers.height }, config.projection.defaultModel ?? 'linear') : ''}
 
   <section id="classes">
     <div class="wrap">
