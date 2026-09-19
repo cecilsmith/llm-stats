@@ -54,6 +54,28 @@ That rewrites the file in place. You can also hand-edit it or swap in your own
 data; the build only requires `name`, `releaseDate`, `isOpenWeights`,
 `totalParameters` (billions) and whichever metric fields your charts reference.
 
+**Carried-forward fields.** As of the 2026-09-18 snapshot, Artificial Analysis
+no longer publishes `totalParameters`, `activeParameters`, `codingIndex`,
+`agenticIndex`, `licenseName` or `huggingfaceUrl` on the leaderboard — the
+parameter counts are now only a coarse `paramClass` bucket (`tiny`/`small`/
+`medium`/`large`). `npm run fetch` copies those fields forward by `slug` from
+the previous `data/models.json` rather than dropping them, and lists them in the
+file's `carriedFields`. Two consequences:
+
+- **Parameter counts** are a fixed property of a release, so carrying them is
+  sound — but **models added since the change have none**, and a model with no
+  `totalParameters` cannot match a size-bounded category, so it is invisible to
+  the open-weight tiers. Fill `totalParameters` in by hand to place one.
+- **`codingIndex` and `agenticIndex` are frozen** at the last snapshot that
+  carried them. The coding chart still renders, but it gains no new points and
+  its scores are on the *old* index scale — see the warning below.
+
+**The Intelligence Index was rebased** in that same change: every model's score
+moved (mean −6.3 points, the frontier top from 65.7 to 53.4). The intelligence
+chart is internally consistent because all 643 models were refetched on the new
+scale, but **intelligence and coding numbers are no longer comparable to each
+other**, and any figure quoted from a pre-2026-09-18 snapshot is on the old scale.
+
 **`data/site.yaml`** — everything else: category thresholds and colours, which
 charts exist, axis labels, and page copy. Some things you can change there:
 
@@ -125,7 +147,7 @@ the browser, and the page defaults to linear without JavaScript.
 
 ### Comparing the two models
 
-Figures below are from the 2026-09-04 snapshot; rerun `npm run refresh` and they move.
+Figures below are from the 2026-09-18 snapshot; rerun `npm run refresh` and they move.
 
 A quadratic always fits at least as well as a linear one, so raw R² is not a
 fair contest. Each series is therefore compared with an **F-test on the
@@ -133,11 +155,11 @@ curvature term** (α = 0.05), shown beside the quadratic R²:
 
 | Metric | Linear R² | Quadratic R² | Curvature |
 | --- | --- | --- | --- |
-| Intelligence — frontier | 0.957 | 0.981 | F=25.5 — **significant** |
-| Intelligence — data-center | 0.926 | 0.958 | F=11.4 — **significant** |
-| Intelligence — < 120B | 0.937 | 0.982 | F=14.5 — **significant** |
-| Intelligence — ≤ 27B | 0.936 | 0.986 | F=14.6 — **significant** |
-| Coding — frontier | 0.970 | 0.977 | F=2.4 — not significant |
+| Intelligence — frontier | 0.933 | 0.984 | F=50.1 — **significant** |
+| Intelligence — data-center | 0.874 | 0.974 | F=58.4 — **significant** |
+| Intelligence — < 120B | 0.802 | 0.960 | F=23.7 — **significant** |
+| Intelligence — ≤ 27B | 0.925 | 0.990 | F=20.4 — **significant** |
+| Coding — frontier | 0.958 | 0.966 | F=2.1 — not significant |
 | Coding — data-center | 0.952 | 0.966 | F=2.9 — not significant |
 | Coding — < 120B | 0.850 | 0.902 | F=2.7 — not significant |
 | Coding — ≤ 27B | 0.819 | 0.908 | F=2.9 — not significant |
@@ -152,10 +174,10 @@ quadratic model puts every catch-up date months earlier than the linear one:
 
 | | Linear | Quadratic |
 | --- | --- | --- |
-| Data-center reaches 65.7 | Feb 2027 | Oct 2026 |
-| < 120B reaches 65.7 | Jun 2027 | Dec 2026 |
-| ≤ 27B reaches 65.7 | May 2027 | Nov 2026 |
-| Trends meet | not separable | Jun 2027 (data-center) |
+| Data-center reaches 53.4 | May 2027 | Nov 2026 |
+| < 120B reaches 53.4 | Aug 2028 | Mar 2027 |
+| ≤ 27B reaches 53.4 | Nov 2027 | Feb 2027 |
+| Trends meet | not separable | Nov 2028 (data-center) |
 
 That spread *is* the result: on this data the answer to "when do open weights
 catch up?" depends as much on the model you pick as on the data itself.

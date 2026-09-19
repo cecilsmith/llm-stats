@@ -3,24 +3,46 @@
  *
  *   npm run fetch
  *
- * The leaderboard is a Next.js app that ships its full model table inside the
- * RSC flight payload (a series of self.__next_f.push([1,"<chunk>"]) calls).
- * We reassemble those chunks, pull out the `{"models":[...]}` array, and keep
- * only the fields the site actually charts.
+ * The leaderboard is a Next.js app that ships its model tables inside the RSC
+ * flight payload (a series of self.__next_f.push([1,"<chunk>"]) calls). We
+ * reassemble those chunks and read the two `"models":[...]` arrays it inlines:
+ *
+ *   - a release index  — slug, name, releaseDate, creator
+ *   - the scored table — slug, name, isOpenWeights, intelligenceIndex, prices…
+ *
+ * They are joined on `slug`. The scored table no longer carries releaseDate,
+ * so both are required.
+ *
+ * CARRIED-FORWARD FIELDS
+ * Artificial Analysis stopped publishing several fields this site charts —
+ * notably totalParameters/activeParameters (now only the coarse `paramClass`
+ * bucket) and codingIndex/agenticIndex. Those are copied from the existing
+ * data/models.json by slug rather than dropped, so a refresh never loses data
+ * the page depends on. Parameter counts are properties of a release and do not
+ * go stale; the carried indices are frozen at whatever snapshot last had them,
+ * and new models have none. See CARRIED in the source below.
  */
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 
 const SOURCE = 'https://artificialanalysis.ai/leaderboards/models';
 const OUT = new URL('../data/models.json', import.meta.url);
 
-const FIELDS = [
-  'name', 'slug', 'releaseDate', 'isReasoning', 'deprecated',
-  'modelCreatorName', 'modelCreatorSlug', 'modelCreatorCountry',
-  'intelligenceIndex', 'intelligenceIndexIsEstimated', 'codingIndex', 'agenticIndex',
-  'isOpenWeights', 'totalParameters', 'activeParameters',
-  'contextWindowTokens', 'licenseName', 'huggingfaceUrl',
+/** Fields read straight from the upstream scored table. */
+const LIVE = [
+  'name', 'slug', 'isReasoning', 'deprecated', 'modelCreatorName',
+  'intelligenceIndex', 'intelligenceIndexIsEstimated',
+  'isOpenWeights', 'paramClass', 'contextWindowTokens',
   'price1mInputTokens', 'price1mOutputTokens', 'medianOutputTokensPerSecond',
 ];
+
+/** Fields upstream no longer publishes; preserved from the previous snapshot. */
+const CARRIED = [
+  'totalParameters', 'activeParameters', 'codingIndex', 'agenticIndex',
+  'modelCreatorSlug', 'modelCreatorCountry', 'licenseName', 'huggingfaceUrl',
+];
+
+/** Refuse to overwrite a good snapshot with a much smaller one. */
+const MIN_RETAINED = 0.9;
 
 /** Reassemble the RSC flight payload from the inlined script chunks. */
 function readFlight(html) {
@@ -44,23 +66,26 @@ function sliceArray(text, start) {
   throw new Error('Unterminated models array in payload.');
 }
 
-/**
- * Find the leaderboard table in the payload. The page inlines two `"models":[...]`
- * arrays of equal length — a lightweight one for the nav dropdown and the full
- * scored table — so we select on the presence of the metric fields, not on size.
- */
-function extractModels(flight) {
-  let best = null;
+/** Every parseable `"models":[...]` array in the payload. */
+function modelArrays(flight) {
+  const out = [];
   for (const m of flight.matchAll(/"models":\s*\[/g)) {
     const start = flight.indexOf('[', m.index);
-    let parsed;
-    try { parsed = JSON.parse(sliceArray(flight, start)); } catch { continue; }
-    if (!Array.isArray(parsed) || !parsed.length) continue;
-    if (!('intelligenceIndex' in parsed[0]) || !('isOpenWeights' in parsed[0])) continue;
-    if (!best || parsed.length > best.length) best = parsed;
+    try {
+      const parsed = JSON.parse(sliceArray(flight, start));
+      if (Array.isArray(parsed) && parsed.length) out.push(parsed);
+    } catch { /* not the array we want */ }
   }
-  if (!best) throw new Error('Could not locate the scored model table in the payload.');
-  return best;
+  return out;
+}
+
+/** Pick the largest array whose rows carry every one of `keys`. */
+function pickTable(arrays, keys, what) {
+  const hit = arrays
+    .filter((a) => keys.every((k) => k in a[0]))
+    .sort((a, b) => b.length - a.length)[0];
+  if (!hit) throw new Error(`Could not locate the ${what} in the payload — the page structure changed.`);
+  return hit;
 }
 
 const res = await fetch(SOURCE, {
@@ -71,18 +96,58 @@ const res = await fetch(SOURCE, {
 });
 if (!res.ok) throw new Error(`${SOURCE} responded ${res.status}`);
 
-const models = extractModels(readFlight(await res.text()))
-  .filter((m) => m.releaseDate && m.intelligenceIndex != null)
-  .map((m) => Object.fromEntries(FIELDS.map((f) => [f, m[f] ?? null])))
+const arrays = modelArrays(readFlight(await res.text()));
+const releases = pickTable(arrays, ['slug', 'releaseDate'], 'release index');
+const scored = pickTable(arrays, ['slug', 'intelligenceIndex', 'isOpenWeights'], 'scored model table');
+
+const releaseDates = new Map(releases.map((m) => [m.slug, m.releaseDate]));
+
+const previous = JSON.parse(await readFile(OUT, 'utf8'));
+const priorBySlug = new Map(previous.models.map((m) => [m.slug, m]));
+
+const models = scored
+  .filter((m) => releaseDates.get(m.slug) && m.intelligenceIndex != null)
+  .map((m) => {
+    const prior = priorBySlug.get(m.slug) ?? {};
+    return {
+      ...Object.fromEntries(LIVE.map((f) => [f, m[f] ?? null])),
+      releaseDate: releaseDates.get(m.slug),
+      ...Object.fromEntries(CARRIED.map((f) => [f, prior[f] ?? null])),
+    };
+  })
   .sort((a, b) => a.releaseDate.localeCompare(b.releaseDate) || a.name.localeCompare(b.name));
+
+// A schema change upstream should fail loudly, not quietly empty the file.
+if (!models.length) throw new Error('Extracted 0 models — refusing to overwrite data/models.json.');
+const retained = models.filter((m) => priorBySlug.has(m.slug)).length;
+if (retained < previous.models.length * MIN_RETAINED) {
+  throw new Error(
+    `Only ${retained} of ${previous.models.length} known models survived the refresh ` +
+    `(threshold ${Math.ceil(previous.models.length * MIN_RETAINED)}) — refusing to overwrite data/models.json.`,
+  );
+}
 
 const payload = {
   source: 'Artificial Analysis',
   sourceUrl: SOURCE,
   retrievedAt: new Date().toISOString().slice(0, 10),
   note: 'totalParameters and activeParameters are in billions. Scores are Artificial Analysis index values (0-100).',
+  carriedFields: CARRIED,
+  carriedNote:
+    'Artificial Analysis no longer publishes these fields; they are carried forward by slug from the ' +
+    'previous snapshot. Parameter counts are fixed properties of a release; codingIndex and agenticIndex ' +
+    'are frozen at the last snapshot that carried them and are absent for models added since.',
   models,
 };
 
 await writeFile(OUT, JSON.stringify(payload, null, 2) + '\n');
+
+const fresh = models.length - retained;
+const missing = CARRIED.filter((f) => models.every((m) => m[f] == null));
 console.log(`Wrote ${models.length} models to data/models.json (retrieved ${payload.retrievedAt}).`);
+console.log(`  ${retained} refreshed, ${fresh} new, ${previous.models.length - retained} dropped upstream.`);
+for (const f of CARRIED) {
+  const n = models.filter((m) => m[f] != null).length;
+  if (n) console.log(`  carried ${f}: ${n}/${models.length}`);
+}
+if (missing.length) console.log(`  no values carried for: ${missing.join(', ')}`);
