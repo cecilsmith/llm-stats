@@ -5,13 +5,19 @@
  *
  * The leaderboard is a Next.js app that ships its model tables inside the RSC
  * flight payload (a series of self.__next_f.push([1,"<chunk>"]) calls). We
- * reassemble those chunks and read the two `"models":[...]` arrays it inlines:
+ * reassemble those chunks and read the tables it inlines:
  *
- *   - a release index  — slug, name, releaseDate, creator
- *   - the scored table — slug, name, isOpenWeights, intelligenceIndex, prices…
+ *   - the scored table  `"models":[…]`  — slug, isOpenWeights, intelligenceIndex, prices…
+ *   - a model index     `"models":[…]`  — slug, name, releaseSlug
+ *   - a release table   `"releases":[…]` — slug, releaseDate, creator
  *
- * They are joined on `slug`. The scored table no longer carries releaseDate,
- * so both are required.
+ * The scored table carries no date, so the release date is resolved per model.
+ * Upstream has moved it twice, so both known shapes are supported:
+ *
+ *   a) releaseDate inline on the model index row          (before 2026-09-29)
+ *   b) model index row -> releaseSlug -> releases[].slug  (current)
+ *
+ * Whichever resolves more of the scored table wins; see resolveReleaseDates.
  *
  * CARRIED-FORWARD FIELDS
  * Artificial Analysis stopped publishing several fields this site charts —
@@ -38,7 +44,7 @@ const LIVE = [
 /** Fields upstream no longer publishes; preserved from the previous snapshot. */
 const CARRIED = [
   'totalParameters', 'activeParameters', 'codingIndex', 'agenticIndex',
-  'modelCreatorSlug', 'modelCreatorCountry', 'licenseName', 'huggingfaceUrl',
+  'modelCreatorCountry', 'licenseName', 'huggingfaceUrl',
 ];
 
 /** Refuse to overwrite a good snapshot with a much smaller one. */
@@ -66,10 +72,10 @@ function sliceArray(text, start) {
   throw new Error('Unterminated models array in payload.');
 }
 
-/** Every parseable `"models":[...]` array in the payload. */
-function modelArrays(flight) {
+/** Every parseable non-empty array inlined under `"<key>":[...]`. */
+function arraysNamed(flight, key) {
   const out = [];
-  for (const m of flight.matchAll(/"models":\s*\[/g)) {
+  for (const m of flight.matchAll(new RegExp(`"${key}":\\s*\\[`, 'g'))) {
     const start = flight.indexOf('[', m.index);
     try {
       const parsed = JSON.parse(sliceArray(flight, start));
@@ -77,6 +83,35 @@ function modelArrays(flight) {
     } catch { /* not the array we want */ }
   }
   return out;
+}
+
+/**
+ * Map each scored model's slug to its release date, trying both known payload
+ * shapes and keeping whichever resolves more rows.
+ *
+ * `releases` may be absent (shape a) — then the model index carries the date
+ * itself. Also returns the creator record where the release table supplies one.
+ */
+function resolveReleaseDates(index, releases, scored) {
+  const wanted = new Set(scored.map((m) => m.slug));
+  const byRelease = new Map(releases.map((r) => [r.slug, r]));
+
+  const inline = new Map();
+  const viaRelease = new Map();
+  for (const row of index) {
+    if (!wanted.has(row.slug)) continue;
+    if (row.releaseDate) inline.set(row.slug, { releaseDate: row.releaseDate, creator: row.creator ?? null });
+    const rel = row.releaseSlug != null ? byRelease.get(row.releaseSlug) : null;
+    if (rel?.releaseDate) viaRelease.set(row.slug, { releaseDate: rel.releaseDate, creator: rel.creator ?? null });
+  }
+
+  const [shape, dates] = viaRelease.size >= inline.size
+    ? ['releaseSlug -> releases[]', viaRelease]
+    : ['inline on the model index', inline];
+  if (!dates.size) {
+    throw new Error('Could not resolve any release dates — the page structure changed.');
+  }
+  return { shape, dates };
 }
 
 /** Pick the largest array whose rows carry every one of `keys`. */
@@ -96,22 +131,27 @@ const res = await fetch(SOURCE, {
 });
 if (!res.ok) throw new Error(`${SOURCE} responded ${res.status}`);
 
-const arrays = modelArrays(readFlight(await res.text()));
-const releases = pickTable(arrays, ['slug', 'releaseDate'], 'release index');
-const scored = pickTable(arrays, ['slug', 'intelligenceIndex', 'isOpenWeights'], 'scored model table');
+const flight = readFlight(await res.text());
+const modelArrays = arraysNamed(flight, 'models');
+const scored = pickTable(modelArrays, ['slug', 'intelligenceIndex', 'isOpenWeights'], 'scored model table');
+const index = pickTable(modelArrays, ['slug', 'name'], 'model index');
+const releases = arraysNamed(flight, 'releases').sort((a, b) => b.length - a.length)[0] ?? [];
 
-const releaseDates = new Map(releases.map((m) => [m.slug, m.releaseDate]));
+const { shape, dates } = resolveReleaseDates(index, releases, scored);
+console.log(`Release dates resolved via ${shape} (${dates.size}/${scored.length} scored models).`);
 
 const previous = JSON.parse(await readFile(OUT, 'utf8'));
 const priorBySlug = new Map(previous.models.map((m) => [m.slug, m]));
 
 const models = scored
-  .filter((m) => releaseDates.get(m.slug) && m.intelligenceIndex != null)
+  .filter((m) => dates.has(m.slug) && m.intelligenceIndex != null)
   .map((m) => {
     const prior = priorBySlug.get(m.slug) ?? {};
+    const { releaseDate, creator } = dates.get(m.slug);
     return {
       ...Object.fromEntries(LIVE.map((f) => [f, m[f] ?? null])),
-      releaseDate: releaseDates.get(m.slug),
+      releaseDate,
+      modelCreatorSlug: creator?.slug ?? prior.modelCreatorSlug ?? null,
       ...Object.fromEntries(CARRIED.map((f) => [f, prior[f] ?? null])),
     };
   })

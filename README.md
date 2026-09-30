@@ -54,6 +54,13 @@ That rewrites the file in place. You can also hand-edit it or swap in your own
 data; the build only requires `name`, `releaseDate`, `isOpenWeights`,
 `totalParameters` (billions) and whichever metric fields your charts reference.
 
+**Payload shape moves often.** Artificial Analysis restructured the leaderboard
+payload twice in September 2026. Release dates are no longer inline on the model
+index; `npm run fetch` now resolves them through `releaseSlug` into a separate
+`releases` table, and falls back to the older inline shape if it reappears. It
+reports which shape it used and how many models it resolved, so a silent partial
+join is visible. If it reports far fewer dates than models, the payload moved again.
+
 **Carried-forward fields.** As of the 2026-09-18 snapshot, Artificial Analysis
 no longer publishes `totalParameters`, `activeParameters`, `codingIndex`,
 `agenticIndex`, `licenseName` or `huggingfaceUrl` on the leaderboard — the
@@ -67,8 +74,10 @@ file's `carriedFields`. Two consequences:
   `totalParameters` cannot match a size-bounded category, so it is invisible to
   the open-weight tiers. Fill `totalParameters` in by hand to place one.
 - **`codingIndex` and `agenticIndex` are frozen** at the last snapshot that
-  carried them. The coding chart still renders, but it gains no new points and
-  its scores are on the *old* index scale — see the warning below.
+  carried them (2026-09-04). The coding chart still renders, but it gains no new
+  points and its scores are on the *old* index scale — see the warning below.
+  Its figures in this file are therefore unchanged between snapshots by
+  construction, not by coincidence.
 
 **The Intelligence Index was rebased** in that same change: every model's score
 moved (mean −6.3 points, the frontier top from 65.7 to 53.4). The intelligence
@@ -147,7 +156,7 @@ the browser, and the page defaults to linear without JavaScript.
 
 ### Comparing the two models
 
-Figures below are from the 2026-09-18 snapshot; rerun `npm run refresh` and they move.
+Figures below are from the 2026-09-29 snapshot; rerun `npm run refresh` and they move.
 
 A quadratic always fits at least as well as a linear one, so raw R² is not a
 fair contest. Each series is therefore compared with an **F-test on the
@@ -155,10 +164,10 @@ curvature term** (α = 0.05), shown beside the quadratic R²:
 
 | Metric | Linear R² | Quadratic R² | Curvature |
 | --- | --- | --- | --- |
-| Intelligence — frontier | 0.933 | 0.984 | F=50.1 — **significant** |
-| Intelligence — data-center | 0.874 | 0.974 | F=58.4 — **significant** |
-| Intelligence — < 120B | 0.802 | 0.960 | F=23.7 — **significant** |
-| Intelligence — ≤ 27B | 0.925 | 0.990 | F=20.4 — **significant** |
+| Intelligence — frontier | 0.936 | 0.987 | F=66.9 — **significant** |
+| Intelligence — data-center | 0.881 | 0.973 | F=48.5 — **significant** |
+| Intelligence — < 120B | 0.840 | 0.963 | F=20.0 — **significant** |
+| Intelligence — ≤ 27B | 0.933 | 0.990 | F=24.3 — **significant** |
 | Coding — frontier | 0.958 | 0.966 | F=2.1 — not significant |
 | Coding — data-center | 0.952 | 0.966 | F=2.9 — not significant |
 | Coding — < 120B | 0.850 | 0.902 | F=2.7 — not significant |
@@ -174,10 +183,10 @@ quadratic model puts every catch-up date months earlier than the linear one:
 
 | | Linear | Quadratic |
 | --- | --- | --- |
-| Data-center reaches 53.4 | May 2027 | Nov 2026 |
-| < 120B reaches 53.4 | Aug 2028 | Mar 2027 |
-| ≤ 27B reaches 53.4 | Nov 2027 | Feb 2027 |
-| Trends meet | not separable | Nov 2028 (data-center) |
+| Data-center reaches 57.6 | Aug 2027 | Dec 2026 |
+| < 120B reaches 57.6 | Jul 2028 | Mar 2027 |
+| ≤ 27B reaches 57.6 | Feb 2028 | Mar 2027 |
+| Trends meet | not separable | Feb 2031 (data-center) |
 
 That spread *is* the result: on this data the answer to "when do open weights
 catch up?" depends as much on the model you pick as on the data itself.
